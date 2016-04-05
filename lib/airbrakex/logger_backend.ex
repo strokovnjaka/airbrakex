@@ -28,16 +28,38 @@ defmodule Airbrakex.LoggerBackend do
     Logger.compare_levels(lvl, min) != :lt
   end
 
-  defp post_event({Logger, msg, _ts, meta}, keys) do
+  defp post_event({Logger, msg, _ts, _meta}, _keys) do
     msg = IO.chardata_to_string(msg)
-    meta = take_into_map(meta, keys)
-    Airbrakex.LoggerParser.parse(msg) |> Airbrakex.Notifier.notify([params: meta])
+    error = Airbrakex.LoggerParser.parse(msg)
+    meta = build_metadata(error)
+    error |> Airbrakex.Notifier.notify(Map.to_list(meta))
   end
 
-  defp take_into_map(metadata, keys) do
-    Enum.reduce metadata, %{}, fn({key, val}, acc) ->
-      if key in keys, do: Map.put(acc, key, val), else: acc
+  defp build_metadata(error) do
+    {:ok, hostname} =  :inet.gethostname
+    context = %{
+      component: get_component(error),
+      hostname: hostname |> to_string,
+      version: Application.get_env(:airbrakex, :version),
+      rootDirectory: Application.app_dir(Application.get_env(:airbrakex, :app_name)),
+    }
+    %{
+      context: context
+    }
+  end
+
+  defp get_component(%{backtrace: backtrace}) do
+    case backtrace do
+      [%{"function" => function} | _t] ->
+        function
+      [h | _t] ->
+        h |> to_string
+      _ ->
+        "unknown"
     end
+  end
+  defp get_component(_) do
+    "unknown"
   end
 
   defp configure(opts) do
